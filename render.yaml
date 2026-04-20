@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: learn-with-me-api
+    env: node
+    rootDir: .
+    buildCommand: npm install && npm run build -w apps/api
+    startCommand: npm run start -w apps/api
+    healthCheckPath: /health
+    envVars:
+      - key: WEB_URL
+        sync: false
+      - key: MONGODB_URI
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_MODEL
+        value: gemini-2.0-flash
+      - key: UPLOAD_MAX_MB
+        value: 6

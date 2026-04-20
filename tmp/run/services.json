@@ -1,0 +1,13 @@
+{
+    "apiPid":  23876,
+    "webPid":  27960,
+    "apiUrl":  "http://localhost:4000",
+    "webUrl":  "http://localhost:3000",
+    "runtimeAiOk":  true,
+    "model":  "gemini-2.5-flash-lite -\u003e gemini-3.1-flash-lite-preview -\u003e gemini-2.5-flash",
+    "apiOut":  "D:\\Learn With Me\\tmp\\run\\api.out.log",
+    "apiErr":  "D:\\Learn With Me\\tmp\\run\\api.err.log",
+    "webOut":  "D:\\Learn With Me\\tmp\\run\\web.out.log",
+    "webErr":  "D:\\Learn With Me\\tmp\\run\\web.err.log",
+    "infoFile":  "D:\\Learn With Me\\tmp\\run\\services.json"
+}

@@ -1,6 +1,7 @@
 services:
   - type: web
     name: learn-with-me-api
+    plan: free
     env: node
     rootDir: .
     buildCommand: npm install && npm run build -w apps/api

@@ -8,6 +8,7 @@ interface RewardInput {
   currentBestValidatedStepIndex: number;
   wrongAttemptCount: number;
   totalSteps: number;
+  wasSolvedBefore: boolean;
   feedback: SubmissionFeedback;
 }
 
@@ -36,7 +37,7 @@ export async function applyRewards(input: RewardInput) {
   const gainedSteps = Math.max(0, targetValidatedStepIndex - input.currentBestValidatedStepIndex);
   let awardedXp = gainedSteps * 15;
 
-  if (input.feedback.status === "correct") {
+  if (input.feedback.status === "correct" && !input.wasSolvedBefore) {
     awardedXp += 30;
   }
 

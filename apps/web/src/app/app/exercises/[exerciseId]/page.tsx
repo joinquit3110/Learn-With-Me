@@ -536,6 +536,27 @@ export default function ExerciseDetailPage() {
   const studentStatus = submission?.status ?? "not_started";
   const composerDisabled = submitMutation.isPending || (!answerText.trim() && !selectedAttachment);
   const latestAttempt = attemptHistory.at(-1) ?? null;
+  const nextCheckpointIndex =
+    studentStatus === "correct"
+      ? totalSteps
+      : Math.min(totalSteps, Math.max(1, latestFeedback?.likelyStepIndex ?? validatedSteps + 1));
+  const coachCheckpointChip =
+    studentStatus === "correct"
+      ? `Solved ${totalSteps}/${totalSteps} checkpoints`
+      : `Checkpoint ${nextCheckpointIndex}/${totalSteps}`;
+  const coachProgressLine =
+    validatedSteps > 0
+      ? `I remember you already validated ${validatedSteps}/${totalSteps} checkpoint${validatedSteps === 1 ? "" : "s"}.`
+      : "No checkpoint is validated yet. Start from checkpoint 1.";
+  const openingCoachLine =
+    studentStatus === "correct"
+      ? "Great work, this exercise is already solved. We can still review any step you choose."
+      : `Let's continue from where you left off. ${coachProgressLine}`;
+  const openingCoachNextPrompt =
+    latestFeedback?.socraticQuestion ||
+    (studentStatus === "correct"
+      ? "If you want a review, tell me which step feels least comfortable and upload that specific line."
+      : `You are currently on checkpoint ${nextCheckpointIndex}/${totalSteps}. Share the exact line where you are stuck, and attach one image or PDF if helpful.`);
 
   return (
     <main className="space-y-6 p-2 pb-32 lg:p-4 lg:pb-40">
@@ -612,7 +633,7 @@ export default function ExerciseDetailPage() {
                 <div className="max-w-[94%] rounded-[30px] bg-slate-950 px-5 py-5 text-white shadow-[0_24px_70px_-42px_rgba(15,23,42,0.8)]">
                   <p className="text-xs font-semibold uppercase tracking-[0.22em] text-white/65">AI coach</p>
                   <MathText
-                    text="Let's work like a normal chat. Send one message at a time, and each message can carry its own image or PDF."
+                    text={openingCoachLine}
                     className="mt-2 text-sm text-white/92"
                   />
                   <div className="mt-4 rounded-[24px] bg-white/8 px-4 py-4">
@@ -620,14 +641,12 @@ export default function ExerciseDetailPage() {
                       What to do next
                     </p>
                     <MathText
-                      text="Tell me the exact line where you are stuck. If you upload an image and I can see the mistaken line or graph mark, I will send the same image back with a hotspot for you to tap."
+                      text={openingCoachNextPrompt}
                       className="mt-2 text-sm text-white/88"
                     />
                   </div>
                   <div className="mt-4 flex flex-wrap gap-2 text-xs text-white/80">
-                    <span className="rounded-full bg-white/10 px-3 py-1">
-                      {studentExercise.stepCount} checkpoint{studentExercise.stepCount === 1 ? "" : "s"}
-                    </span>
+                    <span className="rounded-full bg-white/10 px-3 py-1">{coachCheckpointChip}</span>
                     <span className="rounded-full bg-white/10 px-3 py-1">
                       One file per message
                     </span>
@@ -749,7 +768,11 @@ export default function ExerciseDetailPage() {
                   <div className="max-w-[94%] rounded-[30px] border border-slate-200/80 bg-white px-5 py-4 text-slate-900">
                     <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">AI coach</p>
                     <MathText
-                      text="Your chat history will appear here after the first message. If you upload an image and I detect the wrong line, I will show the same image again with a hotspot for you to tap."
+                      text={
+                        studentStatus === "correct"
+                          ? "This exercise is already solved. If you want extra practice, send one step and I will coach your method without changing the solved status."
+                          : `No messages yet in this attempt history. Start from checkpoint ${nextCheckpointIndex}/${totalSteps}, send your current line, and attach one image or PDF if needed.`
+                      }
                       className="mt-2 text-sm text-slate-700"
                     />
                   </div>
@@ -766,8 +789,8 @@ export default function ExerciseDetailPage() {
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-[0.24em] text-teal-700">Reply to coach</p>
                   <p className="mt-2 text-sm leading-6 text-slate-600">
-                    Send one message at a time. This exact reply can include its own image or PDF, and
-                    phone camera capture is ready.
+                    Send one message at a time. This reply can include one image or PDF, and coach
+                    progress memory will keep your checkpoint context when you return later.
                   </p>
                 </div>
 

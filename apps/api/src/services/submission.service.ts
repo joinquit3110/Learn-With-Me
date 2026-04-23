@@ -59,15 +59,32 @@ export async function submitExerciseAttempt(input: {
       studentId: input.studentId,
     });
 
+  const wasSolvedBefore = existingSubmission.status === "correct" || Boolean(existingSubmission.solvedAt);
+
   const previousAttemptsSummary = existingSubmission.history
     .slice(-4)
-    .map((attempt: { feedback: { status: string; likelyStepIndex: number; shortFeedback: string } }) => {
-      return [
-        `status=${attempt.feedback.status}`,
-        `step=${attempt.feedback.likelyStepIndex}`,
-        `feedback=${attempt.feedback.shortFeedback}`,
-      ].join(" | ");
-    });
+    .map(
+      (attempt: {
+        answerText?: string;
+        feedback: {
+          status: string;
+          likelyStepIndex: number;
+          validatedStepIndex: number;
+          shortFeedback: string;
+        };
+      }) => {
+        const normalizedAnswer = (attempt.answerText ?? "").trim().replace(/\s+/g, " ");
+        const answerPreview = normalizedAnswer ? normalizedAnswer.slice(0, 180) : "(file-only)";
+
+        return [
+          `status=${attempt.feedback.status}`,
+          `likelyStep=${attempt.feedback.likelyStepIndex}`,
+          `validatedStep=${attempt.feedback.validatedStepIndex}`,
+          `studentLine=${answerPreview}`,
+          `feedback=${attempt.feedback.shortFeedback}`,
+        ].join(" | ");
+      },
+    );
   const attachmentText = input.file ? await extractAttachmentText(input.file) : "";
   const combinedExtractedText = [input.answerText.trim(), attachmentText]
     .filter(Boolean)
@@ -83,6 +100,14 @@ export async function submitExerciseAttempt(input: {
     .filter(Boolean)
     .join("\n\n---\n\n");
 
+  const coachMemory = {
+    bestValidatedStepIndex: existingSubmission.bestValidatedStepIndex,
+    wasSolved: wasSolvedBefore,
+    lastLikelyStepIndex: existingSubmission.lastFeedback?.likelyStepIndex ?? 0,
+    lastSocraticQuestion: existingSubmission.lastFeedback?.socraticQuestion ?? "",
+    recentAttempts: previousAttemptsSummary,
+  };
+
   const feedback = await evaluateStudentWork({
     prompt: exercise.prompt,
     theory: exercise.theory,
@@ -92,6 +117,7 @@ export async function submitExerciseAttempt(input: {
     priorWrongAttempts: existingSubmission.wrongAttemptCount,
     previousAttemptsSummary,
     teacherSourceText,
+    coachMemory,
     ...(input.file ? { attachment: toBase64Payload(input.file, attachmentText) } : {}),
   });
 
@@ -110,6 +136,7 @@ export async function submitExerciseAttempt(input: {
     currentBestValidatedStepIndex: existingSubmission.bestValidatedStepIndex,
     wrongAttemptCount: existingSubmission.wrongAttemptCount,
     totalSteps,
+    wasSolvedBefore,
     feedback,
   });
 
@@ -136,7 +163,11 @@ export async function submitExerciseAttempt(input: {
 
   let notebookEntry = null;
 
-  if (feedback.status === "correct" && feedback.notebookDraft) {
+  if (
+    feedback.status === "correct" &&
+    feedback.notebookDraft &&
+    (!wasSolvedBefore || !existingSubmission.notebookEntryId)
+  ) {
     notebookEntry =
       (existingSubmission.notebookEntryId
         ? await NotebookEntryModel.findById(existingSubmission.notebookEntryId)

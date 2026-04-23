@@ -48,6 +48,24 @@ interface PendingSourceFile {
   previewUrl: string | null;
 }
 
+interface AiDraftResponse {
+  draft: {
+    title: string;
+    summary: string;
+    suggestedPrompt: string;
+    suggestedTheory: string;
+    suggestedFinalAnswer: string;
+    rubric: string;
+    steps: EditableStep[];
+  };
+  draftSource: "ai" | "fallback";
+  draftWarning: string | null;
+  sourceAttachmentIds: string[];
+  sourceAttachmentId: string | null;
+  sourceAttachments: AttachmentRecord[];
+  sourceAttachment: AttachmentRecord | null;
+}
+
 function blankStep(): EditableStep {
   return {
     title: "",
@@ -195,42 +213,14 @@ export function ExerciseEditor({
           formData.append("attachments", pendingSourceFile.file);
         }
 
-        return apiRequest<{
-          draft: {
-            title: string;
-            summary: string;
-            suggestedPrompt: string;
-            suggestedTheory: string;
-            suggestedFinalAnswer: string;
-            rubric: string;
-            steps: EditableStep[];
-          };
-          sourceAttachmentIds: string[];
-          sourceAttachmentId: string | null;
-          sourceAttachments: AttachmentRecord[];
-          sourceAttachment: AttachmentRecord | null;
-        }>("/exercises/ai-draft", {
+        return apiRequest<AiDraftResponse>("/exercises/ai-draft", {
           method: "POST",
           token,
           formData,
         });
       }
 
-      return apiRequest<{
-        draft: {
-          title: string;
-          summary: string;
-          suggestedPrompt: string;
-          suggestedTheory: string;
-          suggestedFinalAnswer: string;
-          rubric: string;
-          steps: EditableStep[];
-        };
-        sourceAttachmentIds: string[];
-        sourceAttachmentId: string | null;
-        sourceAttachments: AttachmentRecord[];
-        sourceAttachment: AttachmentRecord | null;
-      }>("/exercises/ai-draft", {
+      return apiRequest<AiDraftResponse>("/exercises/ai-draft", {
         method: "POST",
         token,
         body: {
@@ -255,6 +245,15 @@ export function ExerciseEditor({
         sourceAttachments: response.sourceAttachments,
       }));
       clearPendingSourceFiles();
+
+      if (response.draftSource === "fallback") {
+        toast(
+          response.draftWarning ??
+            "AI Co-pilot is temporarily unavailable, so this draft was generated in fallback mode.",
+        );
+        return;
+      }
+
       toast.success("AI draft generated. Review every step before publishing.");
     },
     onError: (error) => {

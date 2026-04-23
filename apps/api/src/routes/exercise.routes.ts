@@ -397,7 +397,7 @@ exerciseRouter.post(
       }
     }
 
-    const draft = await generateTeacherCopilotDraft({
+    const draftResult = await generateTeacherCopilotDraft({
       prompt: payload.prompt,
       theory: payload.theory,
       finalAnswer: payload.finalAnswer,
@@ -411,7 +411,9 @@ exerciseRouter.post(
     const serializedSourceAttachments = sourceAssets.map((sourceAsset) => serializeAttachment(sourceAsset));
 
     res.json({
-      draft,
+      draft: draftResult.draft,
+      draftSource: draftResult.source,
+      draftWarning: draftResult.warning,
       sourceAttachmentIds: sourceAssets.map((sourceAsset) => String(sourceAsset._id)),
       sourceAttachmentId: sourceAssets[0] ? String(sourceAssets[0]._id) : null,
       sourceAttachments: serializedSourceAttachments,

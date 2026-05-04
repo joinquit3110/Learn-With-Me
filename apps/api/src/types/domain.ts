@@ -19,6 +19,9 @@ export const submissionStatuses = [
 ] as const;
 export type SubmissionStatus = (typeof submissionStatuses)[number];
 
+export const submissionTriageStatuses = ["open", "watching", "resolved", "dismissed"] as const;
+export type SubmissionTriageStatus = (typeof submissionTriageStatuses)[number];
+
 export const errorTypes = [
   "formula",
   "reasoning",

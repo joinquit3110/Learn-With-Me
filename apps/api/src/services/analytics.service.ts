@@ -3,6 +3,7 @@ import { EnrollmentModel } from "../models/Enrollment.js";
 import { ExerciseModel } from "../models/Exercise.js";
 import { SubmissionModel } from "../models/Submission.js";
 import { UserModel } from "../models/User.js";
+import { serializeTriageFields } from "./submission.service.js";
 
 const RELATED_LEARNER_LIMIT = 12;
 
@@ -121,6 +122,7 @@ export async function getClassroomAnalytics(classroomId: string) {
         exerciseTitle: exercise?.title ?? "Exercise",
         submissionId: toId(submission._id),
         status: submission.status,
+        ...serializeTriageFields(submission),
         wrongAttemptCount: submission.wrongAttemptCount,
         attemptCount: submission.attemptCount,
         lastAttemptAt: toIso(submission.updatedAt),
@@ -139,8 +141,21 @@ export async function getClassroomAnalytics(classroomId: string) {
       percentage: incorrectEventCount === 0 ? 0 : Math.round((blindspot.count / incorrectEventCount) * 100),
     }));
 
-  const flaggedSubmissions = submissions.filter((submission) => submission.teacherFlagged || submission.sosTriggered);
-  const sosSubmissions = submissions.filter((submission) => submission.sosTriggered);
+  const isActiveFlaggedSubmission = (submission: (typeof submissions)[number]) =>
+    submission.status !== "correct" &&
+    !["resolved", "dismissed"].includes(submission.triageStatus ?? "open") &&
+    (submission.teacherFlagged || submission.sosTriggered || ["open", "watching"].includes(submission.triageStatus ?? "open"));
+
+  const flaggedSubmissions = submissions.filter(isActiveFlaggedSubmission);
+  const sosSubmissions = flaggedSubmissions.filter((submission) => submission.sosTriggered || submission.status === "sos");
+  const triageCounts = flaggedSubmissions.reduce(
+    (counts, submission) => {
+      const triageStatus = submission.triageStatus ?? "open";
+      counts[triageStatus as keyof typeof counts] += 1;
+      return counts;
+    },
+    { open: 0, watching: 0, resolved: 0, dismissed: 0 },
+  );
 
   const exerciseMastery = exercises.map((exercise) => {
     const exerciseSubmissions = submissions.filter(
@@ -164,6 +179,10 @@ export async function getClassroomAnalytics(classroomId: string) {
       submissions: submissions.length,
       flagged: flaggedSubmissions.length,
       sos: sosSubmissions.length,
+      triageActive: triageCounts.open,
+      triageWatching: triageCounts.watching,
+      triageResolved: triageCounts.resolved,
+      triageDismissed: triageCounts.dismissed,
     },
     blindspots,
     mastery: exerciseMastery.sort((left, right) => right.attempts - left.attempts),
@@ -184,6 +203,7 @@ export async function getClassroomAnalytics(classroomId: string) {
         enrollmentId: enrollment ? toId(enrollment._id) : "",
         track: enrollment?.track ?? "core",
         status: submission.status,
+        ...serializeTriageFields(submission),
         teacherFlagged: Boolean(submission.teacherFlagged),
         sosTriggered: Boolean(submission.sosTriggered),
         attemptCount: submission.attemptCount,

@@ -1,4 +1,5 @@
 import { AppError } from "../lib/app-error.js";
+import { ClassroomModel } from "../models/Classroom.js";
 import { AssetModel } from "../models/Asset.js";
 import { NotebookEntryModel } from "../models/NotebookEntry.js";
 import { SubmissionModel } from "../models/Submission.js";
@@ -11,6 +12,8 @@ import {
 } from "./asset.service.js";
 import { getExerciseSourceAssetIds, getExerciseWithAccessOrThrow } from "./classroom.service.js";
 import { applyRewards } from "./user-stats.service.js";
+
+import type { SubmissionTriageStatus } from "../types/domain.js";
 
 function toBase64Payload(file: UploadFileInput, extractedText = "") {
   const kind = getAttachmentKind(file.mimetype);
@@ -30,6 +33,69 @@ function toBase64Payload(file: UploadFileInput, extractedText = "") {
 export async function getStudentSubmission(exerciseId: string, studentId: string) {
   const submission = await SubmissionModel.findOne({ exerciseId, studentId }).lean();
   return submission;
+}
+
+export function serializeTriageFields(submission: {
+  triageStatus?: string | null;
+  triageNote?: string | null;
+  triageUpdatedAt?: Date | string | null;
+  triageUpdatedBy?: unknown;
+  triageSnoozedUntil?: Date | string | null;
+  triageResolvedAt?: Date | string | null;
+  triageDismissedAt?: Date | string | null;
+  triageReopenedAt?: Date | string | null;
+}) {
+  const toIso = (value: Date | string | null | undefined) => value ? (value instanceof Date ? value.toISOString() : new Date(value).toISOString()) : null;
+
+  return {
+    triageStatus: (submission.triageStatus ?? "open") as SubmissionTriageStatus,
+    triageNote: submission.triageNote ?? "",
+    triageUpdatedAt: toIso(submission.triageUpdatedAt),
+    triageUpdatedBy: submission.triageUpdatedBy ? String(submission.triageUpdatedBy) : null,
+    triageSnoozedUntil: toIso(submission.triageSnoozedUntil),
+    triageResolvedAt: toIso(submission.triageResolvedAt),
+    triageDismissedAt: toIso(submission.triageDismissedAt),
+    triageReopenedAt: toIso(submission.triageReopenedAt),
+  };
+}
+
+export async function updateTeacherSubmissionTriage(input: {
+  submissionId: string;
+  teacherId: string;
+  status: SubmissionTriageStatus;
+  note?: string;
+  snoozeUntil?: Date | null;
+}) {
+  const submission = await SubmissionModel.findById(input.submissionId);
+
+  if (!submission) {
+    throw new AppError("Submission not found.", 404);
+  }
+
+  const classroom = await ClassroomModel.findOne({ _id: submission.classroomId, teacherId: input.teacherId }).lean();
+
+  if (!classroom) {
+    throw new AppError("You do not have access to this submission.", 403);
+  }
+
+  const now = new Date();
+  const previousStatus = submission.triageStatus ?? "open";
+  submission.triageStatus = input.status;
+  submission.triageNote = input.note?.trim() ?? submission.triageNote ?? "";
+  submission.triageSnoozedUntil = input.status === "watching" ? input.snoozeUntil ?? null : null;
+  submission.triageUpdatedAt = now;
+  submission.triageUpdatedBy = input.teacherId;
+
+  if (input.status === "resolved") {
+    submission.triageResolvedAt = now;
+  } else if (input.status === "dismissed") {
+    submission.triageDismissedAt = now;
+  } else if (input.status === "open" && previousStatus !== "open") {
+    submission.triageReopenedAt = now;
+  }
+
+  await submission.save();
+  return submission.toObject();
 }
 
 export async function submitExerciseAttempt(input: {
@@ -190,6 +256,10 @@ export async function submitExerciseAttempt(input: {
     existingSubmission.solvedAt = new Date();
     existingSubmission.teacherFlagged = false;
     existingSubmission.sosTriggered = false;
+    existingSubmission.triageStatus = "resolved";
+    existingSubmission.triageResolvedAt = existingSubmission.solvedAt;
+    existingSubmission.triageUpdatedAt = existingSubmission.solvedAt;
+    existingSubmission.triageNote = existingSubmission.triageNote || "Auto-resolved when the student submitted a correct answer.";
   }
 
   await existingSubmission.save();

@@ -57,8 +57,8 @@ function submissionStatusTone(status: string) {
 
 function BlindspotLearners({ learners }: { learners: NonNullable<TeacherClassroomDetail["analytics"]>["blindspots"][number]["relatedLearners"] }) {
   return (
-    <div className="pointer-events-none absolute left-3 right-3 top-[calc(100%-0.25rem)] z-[80] hidden overflow-hidden rounded-[22px] border border-teal-100 bg-white/95 p-2 text-xs shadow-[0_28px_90px_-28px_rgba(15,23,42,0.55)] ring-1 ring-slate-950/5 backdrop-blur group-hover:block group-focus-within:block">
-      <div className="max-h-72 space-y-1 overflow-y-auto pr-1 [scrollbar-color:#0f766e_#e2e8f0] [scrollbar-width:thin]">
+    <div className="mt-3 rounded-[20px] border border-teal-100 bg-white/80 p-2 text-xs ring-1 ring-slate-950/5">
+      <div className="max-h-48 space-y-1 overflow-y-auto pr-1 [scrollbar-color:#0f766e_#e2e8f0] [scrollbar-width:thin]">
         {learners.length ? learners.map((learner) => (
           <div key={`${learner.submissionId}-${learner.studentId}`} className="rounded-2xl bg-slate-50 px-3 py-2">
             <p className="font-semibold text-slate-950">{learner.studentName} · {learner.classroomName}</p>
@@ -425,7 +425,7 @@ export default function ClassroomDetailPage() {
               )}
             </Card>
 
-            <Card className="relative z-20 space-y-4 border-slate-200/70 bg-white/85">
+            <Card className="space-y-4 border-slate-200/70 bg-white/85">
               <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
                 <Target size={16} className="text-teal-700" />
                 Blind spots
@@ -435,8 +435,7 @@ export default function ClassroomDetailPage() {
                   {analytics.blindspots.slice(0, 6).map((blindspot) => (
                     <div
                       key={`${blindspot.stepTitle}-${blindspot.concept}`}
-                      className="group relative z-0 rounded-[24px] border border-slate-200/70 bg-slate-50 px-4 py-4 transition hover:z-[70] hover:border-teal-200 hover:bg-white hover:shadow-[0_24px_80px_-55px_rgba(15,23,42,0.6)]"
-                      tabIndex={0}
+                      className="rounded-[24px] border border-slate-200/70 bg-slate-50 px-4 py-4"
                     >
                       <div className="flex items-center justify-between gap-4">
                         <div>
@@ -546,7 +545,7 @@ export default function ClassroomDetailPage() {
                 <SectionHeading eyebrow="Student chat history" title={historyQuery.data?.student?.name ?? "Chat history"} description="Sanitized teacher view." />
                 <Button type="button" variant="secondary" onClick={() => { setHistoryStudentId(null); setHistoryExerciseId(null); copilotMutation.reset(); }}>Close</Button>
               </div>
-              <div className="max-h-[calc(88vh-104px)] overflow-y-auto p-5 [scrollbar-color:#0f766e_#e2e8f0] [scrollbar-width:thin]">
+              <div className="max-h-[calc(88vh-104px)] overflow-y-auto px-5 pb-5 [scrollbar-color:#0f766e_#e2e8f0] [scrollbar-width:thin]">
                 {(() => {
                   const groups = historyGroups;
                   const selectedGroup = selectedHistoryGroup;
@@ -555,7 +554,7 @@ export default function ClassroomDetailPage() {
 
                   return (
                     <>
-                      <div className="sticky top-0 z-10 -mx-5 -mt-5 border-b border-slate-200 bg-white/95 p-5 backdrop-blur">
+                      <div className="sticky top-0 z-10 -mx-5 border-b border-slate-200 bg-white/95 p-5 backdrop-blur">
                         <div className="flex flex-wrap items-center justify-between gap-3">
                           <div>
                             <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Selected exercise</p>

@@ -2,7 +2,7 @@ import mongoose, { type InferSchemaType } from "mongoose";
 
 const { model, models, Schema } = mongoose;
 
-import { errorTypes, submissionStatuses } from "../types/domain.js";
+import { errorTypes, submissionStatuses, submissionTriageStatuses } from "../types/domain.js";
 
 const hotspotSchema = new Schema(
   {
@@ -98,6 +98,14 @@ const submissionSchema = new Schema(
     lastFeedback: { type: feedbackSchema, default: null },
     teacherFlagged: { type: Boolean, default: false },
     sosTriggered: { type: Boolean, default: false },
+    triageStatus: { type: String, enum: submissionTriageStatuses, default: "open", index: true },
+    triageNote: { type: String, default: "" },
+    triageUpdatedAt: { type: Date, default: null },
+    triageUpdatedBy: { type: Schema.Types.ObjectId, ref: "User", default: null },
+    triageSnoozedUntil: { type: Date, default: null },
+    triageResolvedAt: { type: Date, default: null },
+    triageDismissedAt: { type: Date, default: null },
+    triageReopenedAt: { type: Date, default: null },
     solvedAt: { type: Date, default: null },
     notebookEntryId: { type: Schema.Types.ObjectId, ref: "NotebookEntry", default: null },
     teacherHistoryCopilot: { type: teacherHistoryCopilotSchema, default: null },
@@ -107,6 +115,7 @@ const submissionSchema = new Schema(
 );
 
 submissionSchema.index({ exerciseId: 1, studentId: 1 }, { unique: true });
+submissionSchema.index({ classroomId: 1, triageStatus: 1, updatedAt: -1 });
 
 export type SubmissionDocument = InferSchemaType<typeof submissionSchema> & {
   _id: mongoose.Types.ObjectId;

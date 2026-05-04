@@ -12,6 +12,8 @@ import {
   serializeExerciseForStudent,
 } from "./classroom.service.js";
 
+import { serializeTriageFields } from "./submission.service.js";
+
 function toId(value: unknown) {
   return String(value);
 }
@@ -117,10 +119,16 @@ export async function getTeacherDashboard(teacherId: string) {
       ? SubmissionModel.find({
           classroomId: { $in: classroomIds },
           studentId: { $in: activeStudentIds },
-          $or: [{ teacherFlagged: true }, { sosTriggered: true }],
+          status: { $ne: "correct" },
+          triageStatus: { $nin: ["resolved", "dismissed"] },
+          $or: [
+            { teacherFlagged: true },
+            { sosTriggered: true },
+            { triageStatus: { $in: ["open", "watching"] } },
+          ],
         })
-          .sort({ updatedAt: -1 })
-          .limit(10)
+          .sort({ sosTriggered: -1, teacherFlagged: -1, updatedAt: -1 })
+          .limit(50)
           .lean()
       : [],
     Promise.all(classrooms.map((classroom) => getClassroomAnalytics(String(classroom._id)))),
@@ -147,6 +155,15 @@ export async function getTeacherDashboard(teacherId: string) {
     studentCountByClassroom.set(key, (studentCountByClassroom.get(key) ?? 0) + 1);
   }
 
+  const triageCounts = flaggedSubmissions.reduce(
+    (counts, submission) => {
+      const triageStatus = submission.triageStatus ?? "open";
+      counts[triageStatus as keyof typeof counts] += 1;
+      return counts;
+    },
+    { open: 0, watching: 0, resolved: 0, dismissed: 0 },
+  );
+
   return {
     profile: serializeUser(teacher),
     classes: classrooms.map((classroom) => ({
@@ -158,6 +175,12 @@ export async function getTeacherDashboard(teacherId: string) {
     })),
     recentExercises: exercises.slice(0, 10).map(serializeExercise),
     analytics: analyticsList.filter(Boolean),
+    signalCounts: {
+      active: triageCounts.open,
+      watching: triageCounts.watching,
+      resolved: triageCounts.resolved,
+      dismissed: triageCounts.dismissed,
+    },
     flaggedSubmissions: flaggedSubmissions.map((submission) => {
       const classroom = classroomMap.get(toId(submission.classroomId));
       const student = studentMap.get(toId(submission.studentId));
@@ -176,6 +199,7 @@ export async function getTeacherDashboard(teacherId: string) {
         enrollmentId: enrollment ? String(enrollment._id) : "",
         track: enrollment?.track ?? "core",
         status: submission.status,
+        ...serializeTriageFields(submission),
         teacherFlagged: Boolean(submission.teacherFlagged),
         sosTriggered: Boolean(submission.sosTriggered),
         attemptCount: submission.attemptCount,

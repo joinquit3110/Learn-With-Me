@@ -9,6 +9,19 @@ export type SubmissionStatus =
   | "needs_review"
   | "not_started";
 
+export type SubmissionTriageStatus = "open" | "watching" | "resolved" | "dismissed";
+
+export interface SubmissionTriageFields {
+  triageStatus: SubmissionTriageStatus;
+  triageNote: string;
+  triageUpdatedAt: string | null;
+  triageUpdatedBy: string | null;
+  triageSnoozedUntil: string | null;
+  triageResolvedAt: string | null;
+  triageDismissedAt: string | null;
+  triageReopenedAt: string | null;
+}
+
 export interface UserStats {
   xp: number;
   level: number;
@@ -188,7 +201,7 @@ export interface NotebookEntry {
   createdAt: string;
 }
 
-export interface RelatedLearnerSignal {
+export interface RelatedLearnerSignal extends Partial<SubmissionTriageFields> {
   studentId: string;
   studentName: string;
   studentEmail?: string;
@@ -226,6 +239,10 @@ export interface ClassroomAnalytics {
     submissions: number;
     flagged: number;
     sos: number;
+    triageActive?: number;
+    triageWatching?: number;
+    triageResolved?: number;
+    triageDismissed?: number;
   };
   blindspots: ClassroomBlindspot[];
   mastery: Array<{
@@ -234,7 +251,7 @@ export interface ClassroomAnalytics {
     attempts: number;
     accuracy: number;
   }>;
-  flaggedCases: Array<{
+  flaggedCases: Array<SubmissionTriageFields & {
     submissionId: string;
     exerciseId: string;
     exerciseTitle: string;
@@ -266,7 +283,13 @@ export interface TeacherDashboard {
   classes: ClassroomSummary[];
   recentExercises: TeacherExercise[];
   analytics: ClassroomAnalytics[];
-  flaggedSubmissions: Array<{
+  signalCounts?: {
+    active: number;
+    watching: number;
+    resolved: number;
+    dismissed: number;
+  };
+  flaggedSubmissions: Array<SubmissionTriageFields & {
     id: string;
     exerciseId: string;
     exerciseTitle: string;

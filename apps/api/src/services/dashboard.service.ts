@@ -12,6 +12,10 @@ import {
   serializeExerciseForStudent,
 } from "./classroom.service.js";
 
+function toId(value: unknown) {
+  return String(value);
+}
+
 export async function getStudentDashboard(studentId: string) {
   const [student, enrollments, notebooks] = await Promise.all([
     UserModel.findById(studentId),
@@ -106,14 +110,35 @@ export async function getTeacherDashboard(teacherId: string) {
   }
 
   const classroomIds = classrooms.map((classroom) => classroom._id);
-  const [enrollments, flaggedSubmissions, analyticsList] = await Promise.all([
-    EnrollmentModel.find({ classroomId: { $in: classroomIds } }).lean(),
-    SubmissionModel.find({ classroomId: { $in: classroomIds }, teacherFlagged: true })
-      .sort({ updatedAt: -1 })
-      .limit(10)
-      .lean(),
+  const enrollments = await EnrollmentModel.find({ classroomId: { $in: classroomIds } }).lean();
+  const activeStudentIds = enrollments.map((enrollment) => toId(enrollment.studentId));
+  const [flaggedSubmissions, analyticsList] = await Promise.all([
+    activeStudentIds.length
+      ? SubmissionModel.find({
+          classroomId: { $in: classroomIds },
+          studentId: { $in: activeStudentIds },
+          $or: [{ teacherFlagged: true }, { sosTriggered: true }],
+        })
+          .sort({ updatedAt: -1 })
+          .limit(10)
+          .lean()
+      : [],
     Promise.all(classrooms.map((classroom) => getClassroomAnalytics(String(classroom._id)))),
   ]);
+
+  const studentIds = Array.from(new Set(flaggedSubmissions.map((submission) => toId(submission.studentId))));
+  const [students, flaggedExercises] = await Promise.all([
+    studentIds.length ? UserModel.find({ _id: { $in: studentIds } }).lean() : [],
+    flaggedSubmissions.length
+      ? ExerciseModel.find({ _id: { $in: flaggedSubmissions.map((submission) => submission.exerciseId) } }).lean()
+      : [],
+  ]);
+  const studentMap = new Map(students.map((student) => [toId(student._id), student]));
+  const exerciseMap = new Map(flaggedExercises.map((exercise) => [toId(exercise._id), exercise]));
+  const classroomMap = new Map(classrooms.map((classroom) => [toId(classroom._id), classroom]));
+  const enrollmentByClassAndStudent = new Map(
+    enrollments.map((enrollment) => [`${toId(enrollment.classroomId)}::${toId(enrollment.studentId)}`, enrollment]),
+  );
 
   const studentCountByClassroom = new Map<string, number>();
 
@@ -133,14 +158,30 @@ export async function getTeacherDashboard(teacherId: string) {
     })),
     recentExercises: exercises.slice(0, 10).map(serializeExercise),
     analytics: analyticsList.filter(Boolean),
-    flaggedSubmissions: flaggedSubmissions.map((submission) => ({
-      id: String(submission._id),
-      exerciseId: String(submission.exerciseId),
-      classroomId: String(submission.classroomId),
-      studentId: String(submission.studentId),
-      status: submission.status,
-      wrongAttemptCount: submission.wrongAttemptCount,
-      updatedAt: submission.updatedAt.toISOString(),
-    })),
+    flaggedSubmissions: flaggedSubmissions.map((submission) => {
+      const classroom = classroomMap.get(toId(submission.classroomId));
+      const student = studentMap.get(toId(submission.studentId));
+      const exercise = exerciseMap.get(toId(submission.exerciseId));
+      const enrollment = enrollmentByClassAndStudent.get(`${toId(submission.classroomId)}::${toId(submission.studentId)}`);
+
+      return {
+        id: String(submission._id),
+        exerciseId: String(submission.exerciseId),
+        exerciseTitle: exercise?.title ?? "Exercise",
+        classroomId: String(submission.classroomId),
+        classroomName: classroom?.name ?? "Classroom",
+        studentId: String(submission.studentId),
+        studentName: student?.name ?? "Student",
+        studentEmail: student?.email ?? "",
+        enrollmentId: enrollment ? String(enrollment._id) : "",
+        track: enrollment?.track ?? "core",
+        status: submission.status,
+        teacherFlagged: Boolean(submission.teacherFlagged),
+        sosTriggered: Boolean(submission.sosTriggered),
+        attemptCount: submission.attemptCount,
+        wrongAttemptCount: submission.wrongAttemptCount,
+        updatedAt: submission.updatedAt.toISOString(),
+      };
+    }),
   };
 }

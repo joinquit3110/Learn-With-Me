@@ -57,6 +57,20 @@ const feedbackSchema = new Schema(
   { _id: false },
 );
 
+const teacherHistoryCopilotSchema = new Schema(
+  {
+    summary: { type: String, required: true },
+    progress: { type: [String], default: [] },
+    blockers: { type: [String], default: [] },
+    teacherMoves: { type: [String], default: [] },
+    suggestedNextPrompt: { type: String, required: true },
+    source: { type: String, enum: ["ai", "fallback"], required: true },
+    warning: { type: String, default: null },
+    generatedAt: { type: Date, default: () => new Date() },
+  },
+  { _id: false },
+);
+
 const attemptHistorySchema = new Schema(
   {
     answerText: { type: String, default: "" },
@@ -86,6 +100,7 @@ const submissionSchema = new Schema(
     sosTriggered: { type: Boolean, default: false },
     solvedAt: { type: Date, default: null },
     notebookEntryId: { type: Schema.Types.ObjectId, ref: "NotebookEntry", default: null },
+    teacherHistoryCopilot: { type: teacherHistoryCopilotSchema, default: null },
     history: { type: [attemptHistorySchema], default: [] },
   },
   { timestamps: true },

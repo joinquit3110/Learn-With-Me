@@ -188,11 +188,30 @@ export interface NotebookEntry {
   createdAt: string;
 }
 
+export interface RelatedLearnerSignal {
+  studentId: string;
+  studentName: string;
+  studentEmail?: string;
+  classroomId: string;
+  classroomName: string;
+  exerciseId: string;
+  exerciseTitle: string;
+  submissionId: string;
+  status: string;
+  wrongAttemptCount: number;
+  attemptCount: number;
+  lastAttemptAt: string | null;
+  occurrences: number;
+  enrollmentId: string;
+  track: Track;
+}
+
 export interface ClassroomBlindspot {
   concept: string;
   stepTitle: string;
   count: number;
   percentage: number;
+  relatedLearners: RelatedLearnerSignal[];
 }
 
 export interface ClassroomAnalytics {
@@ -217,9 +236,19 @@ export interface ClassroomAnalytics {
   }>;
   flaggedCases: Array<{
     submissionId: string;
+    exerciseId: string;
     exerciseTitle: string;
+    classroomId: string;
+    classroomName: string;
+    studentId: string;
     studentName: string;
+    studentEmail?: string;
+    enrollmentId: string;
+    track: Track;
     status: string;
+    teacherFlagged: boolean;
+    sosTriggered: boolean;
+    attemptCount: number;
     wrongAttemptCount: number;
     updatedAt: string;
   }>;
@@ -240,9 +269,18 @@ export interface TeacherDashboard {
   flaggedSubmissions: Array<{
     id: string;
     exerciseId: string;
+    exerciseTitle: string;
     classroomId: string;
+    classroomName: string;
     studentId: string;
+    studentName: string;
+    studentEmail?: string;
+    enrollmentId: string;
+    track: Track;
     status: string;
+    teacherFlagged: boolean;
+    sosTriggered: boolean;
+    attemptCount: number;
     wrongAttemptCount: number;
     updatedAt: string;
   }>;
@@ -266,3 +304,40 @@ export interface StudentClassroomDetail {
   track: Track;
   exercises: StudentExercise[];
 }
+
+export interface TeacherStudentHistoryCopilotResponse {
+  summary: string;
+  progress: string[];
+  blockers: string[];
+  teacherMoves: string[];
+  suggestedNextPrompt: string;
+  source: "ai" | "fallback";
+  warning: string | null;
+  generatedAt: string | null;
+}
+
+export interface TeacherStudentHistoryResponse {
+  classroom: ClassroomSummary;
+  enrollment: { id: string; track: Track };
+  student: PublicUser | null;
+  groups: Array<{
+    submissionId: string;
+    exerciseId: string;
+    exerciseTitle: string;
+    status: string;
+    attemptCount: number;
+    wrongAttemptCount: number;
+    teacherFlagged: boolean;
+    sosTriggered: boolean;
+    updatedAt: string;
+    copilot: TeacherStudentHistoryCopilotResponse | null;
+    history: Array<{
+      answerText: string;
+      extractedText: string;
+      createdAt: string;
+      attachment: AttachmentRecord | null;
+      feedback: Omit<SubmissionFeedback, "guardrailReason">;
+    }>;
+  }>;
+}
+

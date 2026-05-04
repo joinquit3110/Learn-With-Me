@@ -13,6 +13,7 @@ import { UserModel } from "../models/User.js";
 import { serializeUser } from "../services/auth.service.js";
 import { getClassroomAnalytics } from "../services/analytics.service.js";
 import { serializeAttachment } from "../services/asset.service.js";
+import { generateTeacherStudentHistoryCopilot } from "../services/ai.service.js";
 import {
   generateUniqueJoinCode,
   getAccessibleClassroomOrThrow,
@@ -181,6 +182,248 @@ classroomRouter.get(
     await getTeacherClassroomOrThrow(classroomId, req.auth!.sub);
     const analytics = await getClassroomAnalytics(classroomId);
     res.json({ analytics });
+  }),
+);
+
+const historyQuerySchema = z.object({
+  exerciseId: z.string().trim().min(1).optional(),
+  limit: z.preprocess(
+    (value) => (value === undefined || value === null || value === "" ? undefined : value),
+    z.coerce.number().int().min(1).max(100).default(50),
+  ),
+});
+
+const historyCopilotBodySchema = z.object({
+  exerciseId: z.string().min(1),
+});
+
+type LeanAttempt = {
+  answerText: string;
+  extractedText: string;
+  assetId?: unknown;
+  createdAt: Date;
+  feedback: {
+    status: string;
+    shortFeedback: string;
+    socraticQuestion: string;
+    knowledgeReminder: string;
+    encouragingLine: string;
+    errorType: string;
+    likelyStepIndex: number;
+    validatedStepIndex: number;
+    concepts: string[];
+    teacherFlag: boolean;
+    hotspot?: unknown;
+  };
+};
+type TeacherHistoryCopilot = {
+  summary: string;
+  progress: string[];
+  blockers: string[];
+  teacherMoves: string[];
+  suggestedNextPrompt: string;
+  source: "ai" | "fallback";
+  warning: string | null;
+  generatedAt?: Date;
+};
+
+type LeanSubmission = { history?: LeanAttempt[]; teacherHistoryCopilot?: TeacherHistoryCopilot | null };
+
+function sanitizeTeacherHistorySubmission(
+  submission: LeanSubmission,
+  attachmentById: Map<string, ReturnType<typeof serializeAttachment>>,
+) {
+  const cleanHistory = (submission.history ?? [])
+    .filter((attempt: LeanAttempt) => attempt.feedback.status !== "guardrail")
+    .map((attempt: LeanAttempt) => ({
+      answerText: attempt.answerText,
+      extractedText: attempt.extractedText,
+      createdAt: attempt.createdAt.toISOString(),
+      attachment: attempt.assetId ? attachmentById.get(String(attempt.assetId)) ?? null : null,
+      feedback: {
+        status: attempt.feedback.status,
+        shortFeedback: attempt.feedback.shortFeedback,
+        socraticQuestion: attempt.feedback.socraticQuestion,
+        knowledgeReminder: attempt.feedback.knowledgeReminder,
+        encouragingLine: attempt.feedback.encouragingLine,
+        errorType: attempt.feedback.errorType,
+        likelyStepIndex: attempt.feedback.likelyStepIndex,
+        validatedStepIndex: attempt.feedback.validatedStepIndex,
+        concepts: attempt.feedback.concepts,
+        teacherFlag: attempt.feedback.teacherFlag,
+        hotspot: attempt.feedback.hotspot,
+      },
+    }));
+
+  return cleanHistory;
+}
+
+async function getTeacherStudentHistoryPayload(input: {
+  classroomId: string;
+  studentId: string;
+  teacherId: string;
+  exerciseId?: string;
+  limit: number;
+}) {
+  const classroom = await getTeacherClassroomOrThrow(input.classroomId, input.teacherId);
+  const enrollment = await EnrollmentModel.findOne({ classroomId: input.classroomId, studentId: input.studentId }).lean();
+
+  if (!enrollment) {
+    throw new AppError("Student is not actively enrolled in this classroom.", 404);
+  }
+
+  const [student, exercises, submissions] = await Promise.all([
+    UserModel.findById(input.studentId).lean(),
+    ExerciseModel.find({ classroomId: input.classroomId }).lean(),
+    SubmissionModel.find({
+      classroomId: input.classroomId,
+      studentId: input.studentId,
+      ...(input.exerciseId ? { exerciseId: input.exerciseId } : {}),
+    })
+      .sort({ updatedAt: -1 })
+      .limit(input.limit)
+      .lean(),
+  ]);
+
+  const historyAssetIds = Array.from(
+    new Set(
+      submissions.flatMap((submission: LeanSubmission) =>
+        (submission.history ?? [])
+          .filter((attempt: LeanAttempt) => attempt.feedback.status !== "guardrail" && attempt.assetId)
+          .map((attempt: LeanAttempt) => String(attempt.assetId)),
+      ),
+    ),
+  );
+  const historyAssets = historyAssetIds.length
+    ? await AssetModel.find({ _id: { $in: historyAssetIds }, purpose: "submission_work" }).lean()
+    : [];
+  const attachmentById = new Map(
+    historyAssets.map((asset) => [String(asset._id), serializeAttachment(asset, { includeDataUrl: true })]),
+  );
+
+  const exerciseMap = new Map(exercises.map((exercise) => [String(exercise._id), exercise]));
+  const groups = submissions.map((submission) => ({
+    submissionId: String(submission._id),
+    exerciseId: String(submission.exerciseId),
+    exerciseTitle: exerciseMap.get(String(submission.exerciseId))?.title ?? "Exercise",
+    status: submission.status,
+    attemptCount: submission.attemptCount,
+    wrongAttemptCount: submission.wrongAttemptCount,
+    teacherFlagged: Boolean(submission.teacherFlagged),
+    sosTriggered: Boolean(submission.sosTriggered),
+    updatedAt: submission.updatedAt.toISOString(),
+    copilot: submission.teacherHistoryCopilot
+      ? {
+          summary: submission.teacherHistoryCopilot.summary,
+          progress: submission.teacherHistoryCopilot.progress,
+          blockers: submission.teacherHistoryCopilot.blockers,
+          teacherMoves: submission.teacherHistoryCopilot.teacherMoves,
+          suggestedNextPrompt: submission.teacherHistoryCopilot.suggestedNextPrompt,
+          source: submission.teacherHistoryCopilot.source,
+          warning: submission.teacherHistoryCopilot.warning,
+          generatedAt: submission.teacherHistoryCopilot.generatedAt?.toISOString() ?? null,
+        }
+      : null,
+    history: sanitizeTeacherHistorySubmission(submission, attachmentById) ?? [],
+  }));
+
+  return {
+    classroom: serializeClassroom(classroom),
+    enrollment: { id: String(enrollment._id), track: enrollment.track },
+    student: student ? serializeUser(student) : null,
+    groups,
+  };
+}
+
+classroomRouter.delete(
+  "/:classroomId/enrollments/:enrollmentId",
+  requireRole("teacher"),
+  asyncHandler(async (req, res) => {
+    const classroomId = z.string().parse(req.params.classroomId);
+    const enrollmentId = z.string().parse(req.params.enrollmentId);
+    await getTeacherClassroomOrThrow(classroomId, req.auth!.sub);
+
+    const deleted = await EnrollmentModel.findOneAndDelete({ _id: enrollmentId, classroomId });
+    if (!deleted) {
+      throw new AppError("Enrollment not found.", 404);
+    }
+
+    res.json({ ok: true, enrollmentId });
+  }),
+);
+
+classroomRouter.get(
+  "/:classroomId/students/:studentId/history",
+  requireRole("teacher"),
+  asyncHandler(async (req, res) => {
+    const classroomId = z.string().parse(req.params.classroomId);
+    const studentId = z.string().parse(req.params.studentId);
+    const query = historyQuerySchema.parse(req.query);
+    const payload = await getTeacherStudentHistoryPayload({
+      classroomId,
+      studentId,
+      teacherId: req.auth!.sub,
+      ...(query.exerciseId ? { exerciseId: query.exerciseId } : {}),
+      limit: query.limit,
+    });
+
+    res.json(payload);
+  }),
+);
+
+classroomRouter.post(
+  "/:classroomId/students/:studentId/history/copilot",
+  requireRole("teacher"),
+  asyncHandler(async (req, res) => {
+    const classroomId = z.string().parse(req.params.classroomId);
+    const studentId = z.string().parse(req.params.studentId);
+    const query = historyQuerySchema.parse(req.query);
+    const body = historyCopilotBodySchema.parse(req.body ?? {});
+    const payload = await getTeacherStudentHistoryPayload({
+      classroomId,
+      studentId,
+      teacherId: req.auth!.sub,
+      exerciseId: body.exerciseId,
+      limit: query.limit,
+    });
+    const copilot = await generateTeacherStudentHistoryCopilot({
+      studentName: payload.student?.name ?? "Student",
+      classroomName: payload.classroom.name,
+      history: payload.groups.map((group) => ({
+        exerciseTitle: group.exerciseTitle,
+        status: group.status,
+        attemptCount: group.attemptCount,
+        wrongAttemptCount: group.wrongAttemptCount,
+        attempts: group.history.map((attempt: ReturnType<typeof sanitizeTeacherHistorySubmission>[number]) => ({
+          answerText: attempt.answerText,
+          extractedText: attempt.extractedText,
+          coachReply: [attempt.feedback.shortFeedback, attempt.feedback.socraticQuestion].filter(Boolean).join(" "),
+          status: attempt.feedback.status,
+          concepts: attempt.feedback.concepts,
+          createdAt: attempt.createdAt,
+        })),
+      })),
+    });
+
+    const latestGroup = payload.groups[0];
+
+    const generatedAt = new Date();
+
+    if (latestGroup) {
+      await SubmissionModel.updateOne(
+        { _id: latestGroup.submissionId, classroomId, studentId },
+        {
+          $set: {
+            teacherHistoryCopilot: {
+              ...copilot,
+              generatedAt,
+            },
+          },
+        },
+      );
+    }
+
+    res.json({ ...copilot, generatedAt: generatedAt.toISOString() });
   }),
 );
 

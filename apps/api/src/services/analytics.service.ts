@@ -4,50 +4,45 @@ import { ExerciseModel } from "../models/Exercise.js";
 import { SubmissionModel } from "../models/Submission.js";
 import { UserModel } from "../models/User.js";
 
+const RELATED_LEARNER_LIMIT = 12;
+
+function toId(value: unknown) {
+  return String(value);
+}
+
+function toIso(value: Date | string | null | undefined) {
+  if (!value) return null;
+  return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
+}
+
 export async function getClassroomAnalytics(classroomId: string) {
-  const [classroom, enrollments, exercises, submissions] = await Promise.all([
+  const [classroom, enrollments, exercises] = await Promise.all([
     ClassroomModel.findById(classroomId).lean(),
     EnrollmentModel.find({ classroomId }).lean(),
     ExerciseModel.find({ classroomId }).lean(),
-    SubmissionModel.find({ classroomId }).lean(),
   ]);
 
   if (!classroom) {
     return null;
   }
 
-  const exerciseMap = new Map(exercises.map((exercise) => [String(exercise._id), exercise]));
-  const incorrectEvents: Array<{ label: string; concept: string }> = [];
-  const flaggedSubmissions = submissions.filter((submission) => submission.teacherFlagged);
-  const sosSubmissions = submissions.filter((submission) => submission.sosTriggered);
+  const activeStudentIds = enrollments.map((enrollment) => toId(enrollment.studentId));
+  const activeStudentIdSet = new Set(activeStudentIds);
+  const submissions = activeStudentIds.length
+    ? await SubmissionModel.find({ classroomId, studentId: { $in: activeStudentIds } }).lean()
+    : [];
 
-  for (const submission of submissions) {
-    for (const attempt of submission.history) {
-      if (attempt.feedback.status === "correct") {
-        continue;
-      }
-
-      const exercise = exerciseMap.get(String(submission.exerciseId));
-      const stepTitle =
-        exercise?.solutionSteps?.[Math.max(0, attempt.feedback.likelyStepIndex - 1)]?.title ??
-        "Problem setup";
-
-      if (attempt.feedback.concepts.length === 0) {
-        incorrectEvents.push({
-          label: stepTitle,
-          concept: "General reasoning",
-        });
-        continue;
-      }
-
-      for (const concept of attempt.feedback.concepts) {
-        incorrectEvents.push({
-          label: stepTitle,
-          concept,
-        });
-      }
-    }
-  }
+  const students = activeStudentIds.length
+    ? await UserModel.find({ _id: { $in: activeStudentIds } }).lean()
+    : [];
+  const studentMap = new Map(students.map((student) => [toId(student._id), student]));
+  const enrollmentByStudentId = new Map(enrollments.map((enrollment) => [toId(enrollment.studentId), enrollment]));
+  const exerciseMap = new Map(exercises.map((exercise) => [toId(exercise._id), exercise]));
+  const classroomInfo = {
+    id: toId(classroom._id),
+    name: classroom.name,
+    joinCode: classroom.joinCode,
+  };
 
   const blindspotMap = new Map<
     string,
@@ -55,23 +50,85 @@ export async function getClassroomAnalytics(classroomId: string) {
       concept: string;
       stepTitle: string;
       count: number;
+      relatedLearners: Array<{
+        studentId: string;
+        studentName: string;
+        studentEmail: string;
+        classroomId: string;
+        classroomName: string;
+        exerciseId: string;
+        exerciseTitle: string;
+        submissionId: string;
+        status: string;
+        wrongAttemptCount: number;
+        attemptCount: number;
+        lastAttemptAt: string | null;
+        occurrences: number;
+        enrollmentId: string;
+        track: string;
+      }>;
     }
   >();
+  let incorrectEventCount = 0;
 
-  for (const event of incorrectEvents) {
-    const key = `${event.label}::${event.concept}`;
-    const existing = blindspotMap.get(key);
+  for (const submission of submissions) {
+    if (!activeStudentIdSet.has(toId(submission.studentId))) continue;
 
-    if (existing) {
-      existing.count += 1;
-      continue;
+    const exercise = exerciseMap.get(toId(submission.exerciseId));
+    const student = studentMap.get(toId(submission.studentId));
+    const enrollment = enrollmentByStudentId.get(toId(submission.studentId));
+    const occurrencesByBlindspot = new Map<string, number>();
+
+    for (const attempt of submission.history ?? []) {
+      if (attempt.feedback.status === "correct" || attempt.feedback.status === "guardrail") {
+        continue;
+      }
+
+      const stepTitle =
+        exercise?.solutionSteps?.[Math.max(0, attempt.feedback.likelyStepIndex - 1)]?.title ??
+        "Problem setup";
+      const concepts = attempt.feedback.concepts.length ? attempt.feedback.concepts : ["General reasoning"];
+
+      for (const concept of concepts) {
+        const key = `${stepTitle}::${concept}`;
+        occurrencesByBlindspot.set(key, (occurrencesByBlindspot.get(key) ?? 0) + 1);
+        incorrectEventCount += 1;
+
+        if (!blindspotMap.has(key)) {
+          blindspotMap.set(key, {
+            concept,
+            stepTitle,
+            count: 0,
+            relatedLearners: [],
+          });
+        }
+
+        blindspotMap.get(key)!.count += 1;
+      }
     }
 
-    blindspotMap.set(key, {
-      concept: event.concept,
-      stepTitle: event.label,
-      count: 1,
-    });
+    for (const [key, occurrences] of occurrencesByBlindspot) {
+      const blindspot = blindspotMap.get(key);
+      if (!blindspot || blindspot.relatedLearners.length >= RELATED_LEARNER_LIMIT) continue;
+
+      blindspot.relatedLearners.push({
+        studentId: toId(submission.studentId),
+        studentName: student?.name ?? "Student",
+        studentEmail: student?.email ?? "",
+        classroomId: toId(classroom._id),
+        classroomName: classroom.name,
+        exerciseId: toId(submission.exerciseId),
+        exerciseTitle: exercise?.title ?? "Exercise",
+        submissionId: toId(submission._id),
+        status: submission.status,
+        wrongAttemptCount: submission.wrongAttemptCount,
+        attemptCount: submission.attemptCount,
+        lastAttemptAt: toIso(submission.updatedAt),
+        occurrences,
+        enrollmentId: enrollment ? toId(enrollment._id) : "",
+        track: enrollment?.track ?? "core",
+      });
+    }
   }
 
   const blindspots = Array.from(blindspotMap.values())
@@ -79,38 +136,28 @@ export async function getClassroomAnalytics(classroomId: string) {
     .slice(0, 10)
     .map((blindspot) => ({
       ...blindspot,
-      percentage:
-        incorrectEvents.length === 0 ? 0 : Math.round((blindspot.count / incorrectEvents.length) * 100),
+      percentage: incorrectEventCount === 0 ? 0 : Math.round((blindspot.count / incorrectEventCount) * 100),
     }));
 
-  const flaggedStudentIds = Array.from(
-    new Set(flaggedSubmissions.map((submission) => String(submission.studentId))),
-  );
-  const flaggedStudents = await UserModel.find({ _id: { $in: flaggedStudentIds } }).lean();
-  const flaggedStudentMap = new Map(flaggedStudents.map((student) => [String(student._id), student]));
+  const flaggedSubmissions = submissions.filter((submission) => submission.teacherFlagged || submission.sosTriggered);
+  const sosSubmissions = submissions.filter((submission) => submission.sosTriggered);
 
-  const exercisesById = new Map(exercises.map((exercise) => [String(exercise._id), exercise]));
   const exerciseMastery = exercises.map((exercise) => {
     const exerciseSubmissions = submissions.filter(
-      (submission) => String(submission.exerciseId) === String(exercise._id),
+      (submission) => toId(submission.exerciseId) === toId(exercise._id),
     );
     const correctCount = exerciseSubmissions.filter((submission) => submission.status === "correct").length;
 
     return {
-      exerciseId: String(exercise._id),
+      exerciseId: toId(exercise._id),
       title: exercise.title,
       attempts: exerciseSubmissions.reduce((sum, submission) => sum + submission.attemptCount, 0),
-      accuracy:
-        exerciseSubmissions.length === 0 ? 0 : Math.round((correctCount / exerciseSubmissions.length) * 100),
+      accuracy: exerciseSubmissions.length === 0 ? 0 : Math.round((correctCount / exerciseSubmissions.length) * 100),
     };
   });
 
   return {
-    classroom: {
-      id: String(classroom._id),
-      name: classroom.name,
-      joinCode: classroom.joinCode,
-    },
+    classroom: classroomInfo,
     totals: {
       students: enrollments.length,
       exercises: exercises.length,
@@ -120,13 +167,29 @@ export async function getClassroomAnalytics(classroomId: string) {
     },
     blindspots,
     mastery: exerciseMastery.sort((left, right) => right.attempts - left.attempts),
-    flaggedCases: flaggedSubmissions.slice(0, 8).map((submission) => ({
-      submissionId: String(submission._id),
-      exerciseTitle: exercisesById.get(String(submission.exerciseId))?.title ?? "Exercise",
-      studentName: flaggedStudentMap.get(String(submission.studentId))?.name ?? "Student",
-      status: submission.status,
-      wrongAttemptCount: submission.wrongAttemptCount,
-      updatedAt: submission.updatedAt.toISOString(),
-    })),
+    flaggedCases: flaggedSubmissions.slice(0, 8).map((submission) => {
+      const student = studentMap.get(toId(submission.studentId));
+      const exercise = exerciseMap.get(toId(submission.exerciseId));
+      const enrollment = enrollmentByStudentId.get(toId(submission.studentId));
+
+      return {
+        submissionId: toId(submission._id),
+        exerciseId: toId(submission.exerciseId),
+        exerciseTitle: exercise?.title ?? "Exercise",
+        classroomId: toId(submission.classroomId),
+        classroomName: classroom.name,
+        studentId: toId(submission.studentId),
+        studentName: student?.name ?? "Student",
+        studentEmail: student?.email ?? "",
+        enrollmentId: enrollment ? toId(enrollment._id) : "",
+        track: enrollment?.track ?? "core",
+        status: submission.status,
+        teacherFlagged: Boolean(submission.teacherFlagged),
+        sosTriggered: Boolean(submission.sosTriggered),
+        attemptCount: submission.attemptCount,
+        wrongAttemptCount: submission.wrongAttemptCount,
+        updatedAt: submission.updatedAt.toISOString(),
+      };
+    }),
   };
 }

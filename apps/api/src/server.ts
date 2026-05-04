@@ -1,4 +1,4 @@
-import { env } from "./config/env.js";
+import { env, getAiRuntimeDiagnostics } from "./config/env.js";
 import { connectToDatabase } from "./db/connect.js";
 import { createApp } from "./app.js";
 
@@ -8,6 +8,10 @@ async function bootstrap() {
   const app = createApp();
   const server = app.listen(env.API_PORT, () => {
     console.log(`Learn With Me API listening on http://localhost:${env.API_PORT}`);
+
+    if (env.NODE_ENV !== "production" || env.AI_DIAGNOSTICS_LOG === "true") {
+      console.log("AI runtime diagnostics", getAiRuntimeDiagnostics());
+    }
   });
 
   const shutdown = async () => {

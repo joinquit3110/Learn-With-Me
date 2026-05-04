@@ -8,6 +8,10 @@ import type { FeedbackHotspot } from "@/lib/contracts";
 import { MathText } from "./math-text";
 import { Card } from "./ui";
 
+function clampPercent(value: number) {
+  return Math.max(0, Math.min(100, value));
+}
+
 export function HotspotViewer({
   imageUrl,
   hotspot,
@@ -16,10 +20,14 @@ export function HotspotViewer({
   hotspot: FeedbackHotspot;
 }) {
   const [revealed, setRevealed] = useState(false);
-  const left = `${hotspot.x * 100}%`;
-  const top = `${hotspot.y * 100}%`;
-  const width = `${hotspot.width * 100}%`;
-  const height = `${hotspot.height * 100}%`;
+  const leftValue = clampPercent(hotspot.x * 100);
+  const topValue = clampPercent(hotspot.y * 100);
+  const widthValue = Math.max(1, Math.min(100 - leftValue, hotspot.width * 100));
+  const heightValue = Math.max(1, Math.min(100 - topValue, hotspot.height * 100));
+  const left = `${leftValue}%`;
+  const top = `${topValue}%`;
+  const width = `${widthValue}%`;
+  const height = `${heightValue}%`;
 
   return (
     <Card className="overflow-hidden p-4">
@@ -28,28 +36,30 @@ export function HotspotViewer({
         Focus on the highlighted line
       </div>
 
-      <div className="relative overflow-hidden rounded-[26px] border border-slate-200 bg-slate-950/4">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={imageUrl} alt="Student work upload" className="w-full object-contain" />
-        <div
-          className="pointer-events-none absolute rounded-[18px] border-2 border-orange-500/90 bg-orange-500/12 shadow-[0_0_0_12px_rgba(249,115,22,0.08)]"
-          style={{
-            left,
-            top,
-            width,
-            height,
-          }}
-        />
-        <button
-          type="button"
-          aria-label="Reveal coaching question"
-          onClick={() => setRevealed((current) => !current)}
-          className="absolute h-5 w-5 rounded-full bg-orange-500 shadow-[0_0_0_12px_rgba(249,115,22,0.16)] outline-none transition hover:scale-110 focus-visible:ring-2 focus-visible:ring-orange-500 animate-pulse"
-          style={{
-            left: `calc(${left} + ${width} / 2 - 0.5rem)`,
-            top: `calc(${top} + ${height} / 2 - 0.5rem)`,
-          }}
-        />
+      <div className="overflow-auto rounded-[26px] border border-slate-200 bg-slate-950/4">
+        <div className="relative w-fit max-w-full align-top leading-none">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={imageUrl} alt="Student work upload" className="block h-auto max-w-full align-top" />
+          <div
+            className="pointer-events-none absolute rounded-[18px] border-2 border-orange-500/90 bg-orange-500/12 shadow-[0_0_0_12px_rgba(249,115,22,0.08)]"
+            style={{
+              left,
+              top,
+              width,
+              height,
+            }}
+          />
+          <button
+            type="button"
+            aria-label="Reveal coaching question"
+            onClick={() => setRevealed((current) => !current)}
+            className="absolute h-5 w-5 rounded-full bg-orange-500 shadow-[0_0_0_12px_rgba(249,115,22,0.16)] outline-none transition hover:scale-110 focus-visible:ring-2 focus-visible:ring-orange-500 animate-pulse"
+            style={{
+              left: `calc(${left} + ${width} / 2 - 0.5rem)`,
+              top: `calc(${top} + ${height} / 2 - 0.5rem)`,
+            }}
+          />
+        </div>
       </div>
 
       <div className="mt-4 rounded-3xl border border-orange-200 bg-orange-50 px-4 py-3 text-sm text-orange-950">

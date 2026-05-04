@@ -12,6 +12,26 @@ import { apiRequest } from "@/lib/api";
 import type { TeacherDashboard } from "@/lib/contracts";
 import { sentenceCase } from "@/lib/labels";
 
+function SignalDropdown({ learners }: { learners: Array<{ studentName: string; classroomName: string; exerciseTitle: string; status: string; occurrences?: number; attemptCount?: number; wrongAttemptCount?: number; teacherFlagged?: boolean; sosTriggered?: boolean }> }) {
+  return (
+    <div className="pointer-events-none absolute left-3 right-3 top-[calc(100%-0.25rem)] z-[80] hidden overflow-hidden rounded-[22px] border border-teal-100 bg-white/95 p-2 text-xs shadow-[0_28px_90px_-28px_rgba(15,23,42,0.55)] ring-1 ring-slate-950/5 backdrop-blur group-hover:block group-focus-within:block">
+      <div className="max-h-72 space-y-1 overflow-y-auto pr-1 [scrollbar-color:#0f766e_#e2e8f0] [scrollbar-width:thin]">
+        {learners.length ? learners.slice(0, 12).map((item, index) => (
+          <div key={`${item.studentName}-${item.exerciseTitle}-${index}`} className="rounded-2xl bg-slate-50 px-3 py-2">
+            <p className="font-semibold text-slate-950">{item.studentName} · {item.classroomName}</p>
+            <p className="mt-1 text-slate-600">{item.exerciseTitle} · {sentenceCase(item.status)}</p>
+            <p className="mt-1 text-slate-500">
+              {item.sosTriggered ? "SoS " : ""}{item.teacherFlagged ? "Flagged " : ""}
+              {item.occurrences ? `${item.occurrences} occurrence(s) · ` : ""}
+              {item.wrongAttemptCount ?? 0}/{item.attemptCount ?? 0} wrong attempts
+            </p>
+          </div>
+        )) : <p className="p-2 text-slate-600">No related learner details available.</p>}
+      </div>
+    </div>
+  );
+}
+
 export default function TeacherDashboardPage() {
   const queryClient = useQueryClient();
   const { token, user } = useAuth();
@@ -193,9 +213,9 @@ export default function TeacherDashboardPage() {
           />
 
           {blindspots.length ? (
-            <div className="space-y-3">
+            <div className="space-y-3 overflow-visible">
               {blindspots.map((blindspot) => (
-                <Card key={`${blindspot.stepTitle}-${blindspot.concept}`} className="border-slate-200/70 bg-white/85">
+                <Card key={`${blindspot.stepTitle}-${blindspot.concept}`} className="group relative z-0 border-slate-200/70 bg-white/85 transition hover:z-[70] hover:border-teal-200 hover:bg-white hover:shadow-[0_24px_80px_-55px_rgba(15,23,42,0.6)]" tabIndex={0}>
                   <div className="flex items-center justify-between gap-4">
                     <div>
                       <p className="font-semibold text-slate-950">{blindspot.concept}</p>
@@ -208,6 +228,7 @@ export default function TeacherDashboardPage() {
                       </p>
                     </div>
                   </div>
+                  <SignalDropdown learners={blindspot.relatedLearners ?? []} />
                 </Card>
               ))}
             </div>
@@ -227,8 +248,10 @@ export default function TeacherDashboardPage() {
               {dashboard?.flaggedSubmissions.length ? (
                 dashboard.flaggedSubmissions.slice(0, 5).map((submission) => (
                   <div key={submission.id} className="rounded-2xl border border-rose-200/80 bg-white/70 px-4 py-3 text-sm">
-                    <p className="font-semibold text-slate-950">{sentenceCase(submission.status)}</p>
-                    <p className="mt-1 text-slate-600">{submission.wrongAttemptCount} repeated wrong attempts</p>
+                    <p className="font-semibold text-slate-950">{submission.studentName} · {sentenceCase(submission.status)}</p>
+                    <p className="mt-1 text-slate-600">{submission.classroomName} · {submission.exerciseTitle}</p>
+                    <p className="mt-1 text-slate-600">{submission.wrongAttemptCount} repeated wrong attempts · {submission.attemptCount} total attempts</p>
+                    <p className="mt-1 text-xs text-rose-900/70">{submission.studentEmail ?? "No email available"}</p>
                   </div>
                 ))
               ) : (

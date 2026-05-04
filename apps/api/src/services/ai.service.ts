@@ -88,7 +88,7 @@ const sensitivePersonalTopicPattern =
 const latexMathInstruction =
   "Whenever you mention any mathematical variable, value, expression, equation, inequality, coordinate, interval, fraction, exponent, root, function, or final answer inside JSON strings, wrap it in LaTeX delimiters. Use $...$ for inline maths and $$...$$ only for standalone display maths. Never leave bare maths like x^2 + 3x = 0 outside LaTeX.";
 
-interface GeminiAttachmentInput {
+interface AiAttachmentInput {
   kind: AttachmentKind;
   mimeType: string;
   base64: string;
@@ -120,22 +120,8 @@ interface AiFailureSummary {
   isAuthError: boolean;
 }
 
-function getGeminiModelCandidates() {
-  const models = [env.GEMINI_MODEL];
-
-  for (const candidate of env.GEMINI_FALLBACK_MODELS.split(",")) {
-    const normalized = candidate.trim();
-
-    if (normalized && !models.includes(normalized)) {
-      models.push(normalized);
-    }
-  }
-
-  return models;
-}
-
 function getAiProviderLabel() {
-  return env.AI_PROVIDER === "openai-compatible" ? "OpenAI-compatible provider" : "Gemini";
+  return "OpenAI-compatible provider";
 }
 
 function isAiAuthFailure(summary: Pick<AiFailureSummary, "httpCode" | "message" | "status">) {
@@ -146,10 +132,6 @@ function isAiAuthFailure(summary: Pick<AiFailureSummary, "httpCode" | "message" 
     summary.status === "PERMISSION_DENIED" ||
     Boolean(summary.message && /invalid api key|unauthorized|forbidden|permission denied/i.test(summary.message))
   );
-}
-
-function shouldFallbackToGeminiForOpenAIError(error: unknown) {
-  return !summarizeAiFailure(error).isAuthError;
 }
 
 function shouldUseOpenAICompatible() {
@@ -181,7 +163,7 @@ function createOpenAIChatUrl() {
 }
 
 function createOpenAIMessageParts(
-  input: { systemInstruction: string; userPrompt: string; attachments?: GeminiAttachmentInput[] },
+  input: { systemInstruction: string; userPrompt: string; attachments?: AiAttachmentInput[] },
   forceTextOnlyJsonInstruction: boolean,
 ) {
   const userPrompt = forceTextOnlyJsonInstruction
@@ -202,7 +184,7 @@ function isResponseFormatCompatibilityError(status: number, errorText: string) {
   return /(response_format|json_object|unsupported|not supported|invalid.*response)/i.test(errorText);
 }
 
-function createOpenAIContentParts(userPrompt: string, attachments?: GeminiAttachmentInput[]): OpenAIMessageContentPart[] {
+function createOpenAIContentParts(userPrompt: string, attachments?: AiAttachmentInput[]): OpenAIMessageContentPart[] {
   const content: OpenAIMessageContentPart[] = [{ type: "text", text: userPrompt }];
 
   for (const attachment of attachments ?? []) {
@@ -228,7 +210,7 @@ function createOpenAIContentParts(userPrompt: string, attachments?: GeminiAttach
 async function callOpenAICompatibleParsedJson(input: {
   systemInstruction: string;
   userPrompt: string;
-  attachments?: GeminiAttachmentInput[];
+  attachments?: AiAttachmentInput[];
 }) {
   if (!shouldUseOpenAICompatible()) {
     throw new AppError("OpenAI-compatible provider is not configured.", 502, {
@@ -343,135 +325,16 @@ async function callOpenAICompatibleParsedJson(input: {
 async function callAiParsedJson(input: {
   systemInstruction: string;
   userPrompt: string;
-  attachments?: GeminiAttachmentInput[];
+  attachments?: AiAttachmentInput[];
 }) {
-  if (env.AI_PROVIDER === "openai-compatible") {
-    try {
-      return await callOpenAICompatibleParsedJson(input);
-    } catch (error) {
-      if (!shouldFallbackToGeminiForOpenAIError(error)) {
-        throw error;
-      }
-
-      console.warn("OpenAI-compatible provider unavailable, falling back to Gemini.", error);
-    }
-  }
-
-  return callGeminiParsedJson(input);
+  return callOpenAICompatibleParsedJson(input);
 }
 
-async function callGeminiParsedJson(input: {
-  systemInstruction: string;
-  userPrompt: string;
-  attachments?: GeminiAttachmentInput[];
-}) {
-  const body = JSON.stringify({
-    systemInstruction: {
-      parts: [{ text: input.systemInstruction }],
-    },
-    contents: [
-      {
-        role: "user",
-        parts: [
-          { text: input.userPrompt },
-          ...(input.attachments?.map((attachment) => ({
-            inlineData: {
-              mimeType: attachment.mimeType,
-              data: attachment.base64,
-            },
-          })) ?? []),
-        ],
-      },
-    ],
-    generationConfig: {
-      temperature: 0.2,
-      topP: 0.9,
-      responseMimeType: "application/json",
-    },
-  });
-
-  let lastError: unknown = null;
-  const models = getGeminiModelCandidates();
-
-  for (const model of models) {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
-      model,
-    )}:generateContent?key=${env.GEMINI_API_KEY}`;
-    let response: Response | null = null;
-
-    for (let attempt = 1; attempt <= 3; attempt += 1) {
-      try {
-        response = await fetch(url, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body,
-        });
-      } catch (error) {
-        lastError = error;
-
-        if (attempt < 3) {
-          await new Promise((resolve) => setTimeout(resolve, attempt * 750));
-          continue;
-        }
-
-        break;
-      }
-
-      if (response.ok) {
-        const payload = (await response.json()) as {
-          candidates?: Array<{
-            content?: {
-              parts?: Array<{ text?: string }>;
-            };
-          }>;
-        };
-
-        const responseText =
-          payload.candidates?.[0]?.content?.parts
-            ?.map((part) => part.text ?? "")
-            .join("")
-            .trim() ?? "";
-
-        if (!responseText) {
-          throw new AppError("Gemini returned an empty response.", 502, {
-            model,
-            payload,
-          });
-        }
-
-        const parsed = extractJson<unknown>(responseText);
-        return parsed;
-      }
-
-      const errorText = await response.text();
-      lastError = new AppError("Gemini request failed.", 502, {
-        model,
-        errorText,
-      });
-
-      if (response.status === 429) {
-        break;
-      }
-
-      if (attempt < 3 && [500, 502, 503, 504].includes(response.status)) {
-        await new Promise((resolve) => setTimeout(resolve, attempt * 750));
-        continue;
-      }
-
-      break;
-    }
-  }
-
-  throw new AppError("Gemini request failed.", 502, lastError);
-}
-
-async function callGeminiJson<T>(input: {
+async function callAiJson<T>(input: {
   systemInstruction: string;
   userPrompt: string;
   schema: z.ZodType<T>;
-  attachments?: GeminiAttachmentInput[];
+  attachments?: AiAttachmentInput[];
 }) {
   const parsed = await callAiParsedJson(input);
   return input.schema.parse(parsed);
@@ -497,7 +360,7 @@ function parseRetryDelaySeconds(value: unknown) {
   return Number.isFinite(parsed) ? Math.ceil(parsed) : null;
 }
 
-function extractGeminiErrorText(value: unknown): string | null {
+function extractAiErrorText(value: unknown): string | null {
   if (!value || typeof value !== "object") {
     return null;
   }
@@ -508,7 +371,7 @@ function extractGeminiErrorText(value: unknown): string | null {
     return record.errorText;
   }
 
-  return extractGeminiErrorText(record.details);
+  return extractAiErrorText(record.details);
 }
 
 function summarizeAiFailure(error: unknown): AiFailureSummary {
@@ -603,7 +466,7 @@ function summarizeAiFailure(error: unknown): AiFailureSummary {
 
   visit(error);
 
-  const errorText = extractGeminiErrorText(error);
+  const errorText = extractAiErrorText(error);
 
   if (errorText) {
     try {
@@ -632,7 +495,7 @@ function summarizeAiFailure(error: unknown): AiFailureSummary {
 
         if (Array.isArray(payload.details)) {
           const retryInfo = payload.details.find(
-            (detail) => detail["@type"] === "type.googleapis.com/google.rpc.RetryInfo",
+            (detail) => detail["@type"] === "type.openai-compatible.retry_info",
           );
           const retryAfterSeconds = parseRetryDelaySeconds(retryInfo?.retryDelay);
 
@@ -670,16 +533,16 @@ function createTeacherDraftFallbackWarning(summary: AiFailureSummary) {
 
   if (summary.isQuotaExceeded) {
     if (summary.retryAfterSeconds && summary.retryAfterSeconds > 0) {
-      return `The fallback AI provider is rate-limited right now, so this is a fallback draft. Retry AI Co-pilot in about ${summary.retryAfterSeconds}s for source-grounded output.`;
+      return `The configured AI provider is rate-limited right now, so this is a fallback draft. Retry AI Co-pilot in about ${summary.retryAfterSeconds}s for source-grounded output.`;
     }
 
-    return "The fallback AI provider quota is currently exhausted, so this is a fallback draft. Retry AI Co-pilot when quota resets for source-grounded output.";
+    return "The configured AI provider quota is currently exhausted, so this is a fallback draft. Retry AI Co-pilot when quota resets for source-grounded output.";
   }
 
   return "The configured AI provider is temporarily unavailable, so this is a fallback draft. Review and edit carefully before publishing.";
 }
 
-function createAttachmentTextContext(attachment: GeminiAttachmentInput | undefined, limit = 12_000) {
+function createAttachmentTextContext(attachment: AiAttachmentInput | undefined, limit = 12_000) {
   const normalized = attachment?.extractedText?.trim();
 
   if (!normalized) {
@@ -691,7 +554,7 @@ function createAttachmentTextContext(attachment: GeminiAttachmentInput | undefin
 }
 
 function createAttachmentTextContexts(
-  attachments: GeminiAttachmentInput[] | undefined,
+  attachments: AiAttachmentInput[] | undefined,
   limitPerAttachment = 10_000,
 ) {
   if (!attachments?.length) {
@@ -731,7 +594,7 @@ function clampUnitInterval(value: number) {
   return Math.max(0, Math.min(1, value));
 }
 
-function getImageDimensions(attachment: GeminiAttachmentInput) {
+function getImageDimensions(attachment: AiAttachmentInput) {
   try {
     const buffer = Buffer.from(attachment.base64, "base64");
 
@@ -807,7 +670,7 @@ function getImageDimensions(attachment: GeminiAttachmentInput) {
 
 function normalizeHotspotCandidate(
   candidate: unknown,
-  attachment: GeminiAttachmentInput,
+  attachment: AiAttachmentInput,
   fallbackQuestion: string,
 ) {
   if (!candidate || typeof candidate !== "object") {
@@ -886,7 +749,7 @@ async function localizeImageHotspot(input: {
   }>;
   answerText: string;
   teacherSourceText?: string;
-  attachment: GeminiAttachmentInput;
+  attachment: AiAttachmentInput;
   feedback: SubmissionFeedback;
 }) {
   const systemInstruction = [
@@ -1455,7 +1318,7 @@ function buildFallbackTeacherDraft(input: {
   theory?: string;
   finalAnswer?: string;
   difficulty: string;
-  attachments?: GeminiAttachmentInput[];
+  attachments?: AiAttachmentInput[];
 }) {
   const promptText = input.prompt?.trim() ?? "";
   const theoryText = input.theory?.trim() ?? "";
@@ -1661,7 +1524,7 @@ function buildNormalizedTeacherDraft(
     theory?: string;
     finalAnswer?: string;
     difficulty: string;
-    attachments?: GeminiAttachmentInput[];
+    attachments?: AiAttachmentInput[];
   },
 ): TeacherCopilotDraft {
   const exactDraft = draftSchema.safeParse(parsed);
@@ -2103,7 +1966,7 @@ function buildFallbackEvaluation(input: {
     reviewSnippet: string;
   }>;
   answerText: string;
-  attachment?: GeminiAttachmentInput;
+  attachment?: AiAttachmentInput;
 }): SubmissionFeedback {
   const trimmedAnswerText = input.answerText.trim();
   const evidenceText = [trimmedAnswerText, input.attachment?.extractedText?.trim() ?? ""]
@@ -2294,7 +2157,7 @@ export async function generateTeacherCopilotDraft(input: {
   theory?: string;
   finalAnswer?: string;
   difficulty: string;
-  attachments?: GeminiAttachmentInput[];
+  attachments?: AiAttachmentInput[];
 }): Promise<TeacherCopilotDraftResult> {
   const hasAttachments = (input.attachments?.length ?? 0) > 0;
   const normalizedPrompt = input.prompt?.trim() ?? "";
@@ -2528,7 +2391,7 @@ export async function evaluateStudentWork(input: {
   priorWrongAttempts: number;
   previousAttemptsSummary: string[];
   teacherSourceText?: string;
-  attachment?: GeminiAttachmentInput;
+  attachment?: AiAttachmentInput;
   coachMemory?: {
     bestValidatedStepIndex?: number;
     wasSolved?: boolean;

@@ -24,11 +24,5 @@ services:
         value: cx/gpt-5.5
       - key: OPENAI_FALLBACK_MODELS
         sync: false
-      - key: GEMINI_API_KEY
-        sync: false
-      - key: GEMINI_MODEL
-        value: gemini-2.0-flash
-      - key: GEMINI_FALLBACK_MODELS
-        sync: false
       - key: UPLOAD_MAX_MB
         value: 6

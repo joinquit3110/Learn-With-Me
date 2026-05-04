@@ -26,9 +26,6 @@ const aiProviderEnvKeys = [
   "OPENAI_COMPATIBLE_MODEL",
   "AI_API_KEY",
   "AI_MODEL",
-  "GEMINI_API_KEY",
-  "GEMINI_MODEL",
-  "GEMINI_FALLBACK_MODELS",
 ] as const;
 
 type AiProviderEnvKey = (typeof aiProviderEnvKeys)[number];
@@ -124,14 +121,11 @@ const envSchema = z.object({
     .min(1, "MONGODB_URI is required")
     .default("mongodb://127.0.0.1:27017/learn-with-me-test"),
   JWT_SECRET: z.string().min(16, "JWT_SECRET must be at least 16 characters").default("test-secret-123456"),
-  AI_PROVIDER: z.enum(["gemini", "openai-compatible"]).default("openai-compatible"),
+  AI_PROVIDER: z.literal("openai-compatible").default("openai-compatible"),
   OPENAI_BASE_URL: z.string().url().default("https://shopmmo.id.vn/v1"),
   OPENAI_API_KEY: z.string().default(""),
   OPENAI_MODEL: z.string().default("cx/gpt-5.5"),
   OPENAI_FALLBACK_MODELS: z.string().default(""),
-  GEMINI_API_KEY: z.string().default(""),
-  GEMINI_MODEL: z.string().min(1).default("gemini-2.0-flash"),
-  GEMINI_FALLBACK_MODELS: z.string().default(""),
   UPLOAD_MAX_MB: z.coerce.number().int().positive().default(6),
 });
 
@@ -149,9 +143,6 @@ const parsed = envSchema.safeParse({
   OPENAI_API_KEY: openAiApiKey?.trim(),
   OPENAI_MODEL: process.env.OPENAI_MODEL ?? process.env.OPENAI_COMPATIBLE_MODEL ?? process.env.AI_MODEL,
   OPENAI_FALLBACK_MODELS: process.env.OPENAI_FALLBACK_MODELS,
-  GEMINI_API_KEY: process.env.GEMINI_API_KEY ?? (isTest ? "test-gemini-key" : undefined),
-  GEMINI_MODEL: process.env.GEMINI_MODEL,
-  GEMINI_FALLBACK_MODELS: process.env.GEMINI_FALLBACK_MODELS,
   UPLOAD_MAX_MB: process.env.UPLOAD_MAX_MB,
 });
 

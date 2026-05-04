@@ -369,27 +369,23 @@ describe("evaluateStudentWork", () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue({
       ok: true,
       json: async () => ({
-        candidates: [
+        choices: [
           {
-            content: {
-              parts: [
-                {
-                  text: JSON.stringify({
-                    status: "incorrect",
-                    shortFeedback: "The uploaded work shows the first checkpoint but not the next one yet.",
-                    socraticQuestion: "What value do you get after dividing both sides by 2?",
-                    knowledgeReminder: "Divide both sides by 2 to isolate x.",
-                    encouragingLine: "Your upload is clear enough to validate the first checkpoint.",
-                    errorType: "reasoning",
-                    likelyStepIndex: 2,
-                    validatedStepIndex: 1,
-                    concepts: ["division error"],
-                    guardrailReason: "",
-                    hotspot: null,
-                    teacherFlag: false,
-                  }),
-                },
-              ],
+            message: {
+              content: JSON.stringify({
+                status: "incorrect",
+                shortFeedback: "The uploaded work shows the first checkpoint but not the next one yet.",
+                socraticQuestion: "What value do you get after dividing both sides by 2?",
+                knowledgeReminder: "Divide both sides by 2 to isolate x.",
+                encouragingLine: "Your upload is clear enough to validate the first checkpoint.",
+                errorType: "reasoning",
+                likelyStepIndex: 2,
+                validatedStepIndex: 1,
+                concepts: ["division error"],
+                guardrailReason: "",
+                hotspot: null,
+                teacherFlag: false,
+              }),
             },
           },
         ],

@@ -132,7 +132,7 @@ function pickUploadedFiles(req: Request): UploadFileInput[] {
   );
 }
 
-function toGeminiAttachment(asset: {
+function toAiAttachment(asset: {
   kind: "image" | "pdf";
   mimeType: string;
   dataUrl: string;
@@ -404,7 +404,7 @@ exerciseRouter.post(
       difficulty: payload.difficulty,
       ...(sourceAssets.length > 0
         ? {
-            attachments: sourceAssets.map((sourceAsset) => toGeminiAttachment(sourceAsset)),
+            attachments: sourceAssets.map((sourceAsset) => toAiAttachment(sourceAsset)),
           }
         : {}),
     });

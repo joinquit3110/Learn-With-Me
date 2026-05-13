@@ -2324,6 +2324,24 @@ function buildNormalizedTeacherStudentHistoryCopilot(
     nextPrompt: z.unknown().optional(),
   });
   const loose = looseSchema.parse(parsed);
+  const hasUsableAiFields = Boolean(
+    loose.summary ??
+      loose.overview ??
+      loose.progress ??
+      loose.strengths ??
+      loose.blockers ??
+      loose.difficulties ??
+      loose.teacherMoves ??
+      loose.teacher_moves ??
+      loose.suggestions ??
+      loose.suggestedNextPrompt ??
+      loose.suggested_next_prompt ??
+      loose.nextPrompt,
+  );
+
+  if (!hasUsableAiFields) {
+    throw new AppError("AI history copilot response did not include the required summary fields.", 502, { parsed });
+  }
 
   return {
     summary: normalizeLooseText(loose.summary) || normalizeLooseText(loose.overview) || fallback.summary,
@@ -2396,7 +2414,8 @@ export async function generateTeacherStudentHistoryCopilot(input: {
     "Summarize learning progress, blockers, practical teacher moves, and one safe next prompt for the teacher to use.",
     latexMathInstruction,
     "Return one valid JSON object only. Do not write markdown fences or prose outside JSON.",
-    "Use exactly these keys: summary, progress, blockers, teacherMoves, suggestedNextPrompt.",
+    "The JSON object MUST use exactly these top-level keys and no others: summary, progress, blockers, teacherMoves, suggestedNextPrompt.",
+    "Do not return student, classroom, sanitized_history, metadata, or copied input fields.",
     "progress, blockers, and teacherMoves must be arrays of short strings. suggestedNextPrompt must be one string.",
     "JSON escaping rule: every backslash inside JSON strings must be escaped. Write LaTeX commands as \\frac, \\le, \\sqrt in the final JSON text so JSON.parse receives valid strings.",
   ].join(" ");
@@ -2405,6 +2424,8 @@ export async function generateTeacherStudentHistoryCopilot(input: {
     `Student: ${input.studentName}`,
     `Classroom: ${input.classroomName}`,
     `Sanitized history JSON: ${JSON.stringify(input.history).slice(0, 28_000)}`,
+    "Analyze the sanitized history above and return ONLY this JSON shape:",
+    "{\"summary\":\"...\",\"progress\":[\"...\"],\"blockers\":[\"...\"],\"teacherMoves\":[\"...\"],\"suggestedNextPrompt\":\"...\"}",
   ].join("\n");
 
   try {

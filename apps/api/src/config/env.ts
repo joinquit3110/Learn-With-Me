@@ -122,9 +122,9 @@ const envSchema = z.object({
     .default("mongodb://127.0.0.1:27017/learn-with-me-test"),
   JWT_SECRET: z.string().min(16, "JWT_SECRET must be at least 16 characters").default("test-secret-123456"),
   AI_PROVIDER: z.literal("openai-compatible").default("openai-compatible"),
-  OPENAI_BASE_URL: z.string().url().default("https://shopmmo.id.vn/v1"),
+  OPENAI_BASE_URL: z.string().url().default("https://api.vietapi.tech/v1"),
   OPENAI_API_KEY: z.string().default(""),
-  OPENAI_MODEL: z.string().default("cx/gpt-5.5"),
+  OPENAI_MODEL: z.string().default("gpt-5.5-high"),
   OPENAI_FALLBACK_MODELS: z.string().default(""),
   UPLOAD_MAX_MB: z.coerce.number().int().positive().default(6),
 });

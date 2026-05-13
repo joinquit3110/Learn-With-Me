@@ -83,7 +83,7 @@ const promptInjectionPattern =
   /(ignore previous|ignore all previous|forget previous|developer instructions|system prompt|hidden prompt|reveal the answer|give the exact answer|show the final answer|bypass|jailbreak|prompt injection|write code|history lesson|play a game|act as|override your role)/i;
 
 const sensitivePersonalTopicPattern =
-  /(love|crush|relationship|dating|break\s?up|boyfriend|girlfriend|feelings|anxiety|depression|mental health|stress|lonely|self\s?-?esteem|tinh\s?yeu|yeu\s?don\s?phuong|nguoi\s?yeu|chia\s?tay|tam\s?ly|tram\s?cam|lo\s?au|ap\s?luc|co\s?don|gia\s?dinh|ban\s?be)/i;
+  /(love|crush|relationship|dating|break\s?up|boyfriend|girlfriend|feelings|anxiety|depression|mental health|stress|lonely|self\s?-?esteem|tinh\s?cam|tinh\s?yeu|yeu\s?don\s?phuong|nguoi\s?yeu|chia\s?tay|tam\s?ly|tram\s?cam|lo\s?au|ap\s?luc|co\s?don|gia\s?dinh|ban\s?be)/i;
 
 const latexMathInstruction =
   "Whenever you mention any mathematical variable, value, expression, equation, inequality, coordinate, interval, fraction, exponent, root, function, or final answer inside JSON strings, wrap it in LaTeX delimiters. Use $...$ for inline maths and $$...$$ only for standalone display maths. Never leave bare maths like x^2 + 3x = 0 outside LaTeX.";
@@ -170,9 +170,12 @@ function createOpenAIMessageParts(
     ? `${input.userPrompt}\n\nReturn exactly one valid JSON object only. Do not add markdown fences or extra prose.`
     : input.userPrompt;
 
+  const contentParts = createOpenAIContentParts(userPrompt, input.attachments);
+  const userContent = input.attachments?.length ? contentParts : userPrompt;
+
   return [
     { role: "system", content: input.systemInstruction },
-    { role: "user", content: createOpenAIContentParts(userPrompt, input.attachments) },
+    { role: "user", content: userContent },
   ];
 }
 
@@ -282,7 +285,22 @@ async function callOpenAICompatibleParsedJson(input: {
             });
           }
 
-          return extractJson<unknown>(responseText);
+          try {
+            return extractJson<unknown>(responseText);
+          } catch (error) {
+            lastError = error;
+
+            if (preferResponseFormat) {
+              continue;
+            }
+
+            if (attempt < 3) {
+              await new Promise((resolve) => setTimeout(resolve, attempt * 750));
+              continue;
+            }
+
+            break;
+          }
         }
 
         const errorText = await response.text();
@@ -979,7 +997,9 @@ function applyOutOfOrderCheckpointHeuristic(
     feedback.status === "correct" ||
     feedback.status === "guardrail" ||
     looksAnswerCheckIntent(input.answerText) ||
-    looksMultiPartLabeledInput(input.answerText)
+    /(?:^|[\r\n])\s*[a-z][).]\s+/i.test(input.answerText) ||
+    looksMultiPartLabeledInput(input.answerText) ||
+    looksMultiPartLabeledInput(input.attachmentText ?? "")
   ) {
     return feedback;
   }
@@ -1098,8 +1118,14 @@ function looksAnswerCheckIntent(value: string) {
 }
 
 function looksMultiPartLabeledInput(value: string) {
+  const normalized = value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/đ/g, "d");
+
+  if (/^\s*(?:[a-z][).]|\([a-z]\)|cau\s*\d+|question\s*\d+|part\s*[a-z0-9]+|checkpoint\s*\d+)(?:\s|:|\))/im.test(normalized)) {
+    return true;
+  }
+
   return /(?:^|[\s\n;,.])(?:[a-z]\)|[a-z]\.|\([a-z]\)|cau\s*\d+|question\s*\d+|part\s*[a-z0-9]+|checkpoint\s*\d+)(?:\s|:|\))/i.test(
-    value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/đ/g, "d"),
+    normalized,
   );
 }
 
@@ -2032,6 +2058,32 @@ function buildFallbackEvaluation(input: {
   }
 
   if (finalLineCorrect && !hasProcessEvidence) {
+    if (missingCheckpointContext && looksMultiPartLabeledInput(evidenceText)) {
+      const laterCheckpoint = missingCheckpointContext.laterCheckpoint;
+      const targetStep = input.steps[Math.max(0, laterCheckpoint - 1)];
+
+      return {
+        status: "needs_review",
+        shortFeedback: `I can see labeled work for checkpoint ${laterCheckpoint}. Let's review that part before connecting it to the full sequence.`,
+        socraticQuestion:
+          targetStep?.hintQuestions[0] ??
+          `Can you explain the labeled checkpoint ${laterCheckpoint} line in your own words?`,
+        knowledgeReminder:
+          targetStep?.explanation ??
+          `Check the rule used in checkpoint ${laterCheckpoint}.`,
+        encouragingLine: "Good effort separating the parts. We can validate them one label at a time.",
+        errorType: "reasoning",
+        likelyStepIndex: laterCheckpoint,
+        validatedStepIndex: Math.max(0, laterCheckpoint - 1),
+        concepts:
+          targetStep?.misconceptionTags.length
+            ? targetStep.misconceptionTags
+            : ["Labeled checkpoint review"],
+        teacherFlag: false,
+        hotspot: null,
+      };
+    }
+
     if (missingCheckpointContext) {
       const targetStep = input.steps[Math.max(0, missingCheckpointContext.missingCheckpoint - 1)];
 
@@ -2414,9 +2466,14 @@ export async function evaluateStudentWork(input: {
   const rememberedSocraticQuestion = input.coachMemory?.lastSocraticQuestion?.trim() ?? "";
   const rememberedAttempts = (input.coachMemory?.recentAttempts ?? []).slice(-4);
 
-  const isMetaNavigationIntent = trimmedAnswerText ? looksMetaNavigationIntent(trimmedAnswerText) : false;
+  const isSensitivePersonalTopic = trimmedAnswerText ? looksSensitivePersonalTopic(trimmedAnswerText) : false;
+  const isMetaNavigationIntent = trimmedAnswerText && !isSensitivePersonalTopic ? looksMetaNavigationIntent(trimmedAnswerText) : false;
   const isAnswerCheckIntent = trimmedAnswerText ? looksAnswerCheckIntent(trimmedAnswerText) : false;
   const isMultiPartLabeledInput = trimmedAnswerText ? looksMultiPartLabeledInput(trimmedAnswerText) : false;
+
+  if (trimmedAnswerText && isSensitivePersonalTopic) {
+    return createGuardrailFeedback("off_topic", "sensitive_personal");
+  }
 
   if (trimmedAnswerText && isMetaNavigationIntent) {
     return createMetaNavigationFeedback({
@@ -2430,10 +2487,6 @@ export async function evaluateStudentWork(input: {
 
   if (trimmedAnswerText && promptInjectionPattern.test(trimmedAnswerText)) {
     return createGuardrailFeedback("prompt_injection");
-  }
-
-  if (trimmedAnswerText && looksSensitivePersonalTopic(trimmedAnswerText)) {
-    return createGuardrailFeedback("off_topic", "sensitive_personal");
   }
 
   if (trimmedAnswerText && looksOffTopic(trimmedAnswerText) && !input.attachment) {

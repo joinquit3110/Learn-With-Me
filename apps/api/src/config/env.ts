@@ -124,7 +124,7 @@ const envSchema = z.object({
   AI_PROVIDER: z.literal("openai-compatible").default("openai-compatible"),
   OPENAI_BASE_URL: z.string().url().default("https://api.vietapi.tech/v1"),
   OPENAI_API_KEY: z.string().default(""),
-  OPENAI_MODEL: z.string().default("gpt-5.5-high"),
+  OPENAI_MODEL: z.string().default("gpt-5.5-xhigh"),
   OPENAI_FALLBACK_MODELS: z.string().default(""),
   UPLOAD_MAX_MB: z.coerce.number().int().positive().default(6),
 });

@@ -17,12 +17,12 @@ services:
       - key: AI_PROVIDER
         value: openai-compatible
       - key: OPENAI_BASE_URL
-        value: https://shopmmo.id.vn/v1
+        value: https://api.vietapi.tech/v1
       - key: OPENAI_API_KEY
-        sync: false
+        value: sk-6x9A0KPEMDwKpKvrCW1NAHKXjvOSBXE8Lk7i40xg7fHZosHJ
       - key: OPENAI_MODEL
-        value: cx/gpt-5.5
+        value: gpt-5.5-xhigh
       - key: OPENAI_FALLBACK_MODELS
-        sync: false
+        value: ""
       - key: UPLOAD_MAX_MB
         value: 6
